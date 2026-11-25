@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: payment-orders-sa
+  namespace: payment-orders
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-orders-service
+  namespace: payment-orders
+  labels:
+    app: payment-orders-service
+    compliance: fips-140-3
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-orders-service
+  template:
+    metadata:
+      labels:
+        app: payment-orders-service
+    spec:
+      serviceAccountName: payment-orders-sa
+      nodeSelector:
+        workload-tier: pci-regulated
+        fips-enabled: "true"
+      securityContext:
+        runAsNonRoot: true
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: payment-orders
+          image: registry.internal.example.com/payment-orders-service:latest
+          ports:
+            - containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: 8080
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: 8080
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: tmp-storage
+              mountPath: /tmp
+            - name: shared-files
+              mountPath: /mnt/payment-artifacts
+      volumes:
+        - name: tmp-storage
+          emptyDir: {}
+        - name: shared-files
+          persistentVolumeClaim:
+            claimName: payment-orders-azurefile-pvc
